@@ -1,0 +1,137 @@
+"""Order service."""
+
+from typing import Optional, Tuple
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database.repositories.order_repository import OrderRepository
+from app.database.models.order import Order, OrderStatus
+from app.database.repositories.config_repository import ConfigRepository
+from app.database.repositories.admin_action_repository import AdminActionRepository
+
+
+class OrderService:
+    """Service for order-related business logic."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.order_repo = OrderRepository(session)
+        self.config_repo = ConfigRepository(session)
+        self.admin_action_repo = AdminActionRepository(session)
+
+    async def get_order_by_id(self, order_id: int) -> Optional[Order]:
+        """Get order by ID."""
+        return await self.order_repo.get_by_id(order_id)
+
+    async def get_user_orders(self, user_id: int) -> list[Order]:
+        """Get all orders for a user."""
+        return await self.order_repo.get_user_orders(user_id)
+
+    async def get_pending_orders_for_user(self, user_id: int) -> list[Order]:
+        """Get pending orders for a user."""
+        return await self.order_repo.get_pending_orders_for_user(user_id)
+
+    async def create_order(
+        self,
+        user_id: int,
+        product_id: int,
+        amount: float,
+        currency: str,
+        unit_price: float,
+    ) -> Order:
+        """Create a new order."""
+        return await self.order_repo.create(
+            user_id=user_id,
+            product_id=product_id,
+            amount=amount,
+            currency=currency,
+            unit_price=unit_price,
+        )
+
+    async def submit_receipt(
+        self,
+        order_id: int,
+        receipt_file_id: str,
+        receipt_file_unique_id: str,
+    ) -> Optional[Order]:
+        """Submit receipt for an order."""
+        return await self.order_repo.submit_receipt(
+            order_id=order_id,
+            receipt_file_id=receipt_file_id,
+            receipt_file_unique_id=receipt_file_unique_id,
+        )
+
+    async def approve_order_and_assign_config(
+        self, order_id: int, admin_id: int
+    ) -> Tuple[Optional[Order], Optional[int], str]:
+        """
+        Approve an order and assign a config atomically.
+        Returns (order, config_id, error_message).
+        Error message is empty if successful.
+        """
+        # Start atomic operation
+        async with self.session.begin_nested():
+            # Approve the order
+            order, error = await self.order_repo.approve_order(order_id, admin_id)
+
+            if not order:
+                return None, None, error or "Order not found"
+
+            if error:
+                return order, None, error
+
+            # Find an available config for this order's product
+            config = await self.config_repo.get_first_available_for_product(
+                order.product_id, with_lock=True
+            )
+
+            if not config:
+                # Rollback the approval since no config is available
+                # This should not happen in normal flow, but handle it
+                return order, None, "No available config found for this product"
+
+            # Assign the config
+            config.status = "ASSIGNED"
+            config.assigned_to_user_id = order.user_id
+            config.order_id = order.id
+
+            from datetime import datetime
+
+            config.assigned_at = datetime.utcnow()
+
+            await self.session.flush()
+
+            # Log the admin action
+            await self.admin_action_repo.log_order_approval(
+                admin_id=admin_id, order_id=order_id, config_id=config.id
+            )
+
+            return order, config.id, ""
+
+    async def reject_order(
+        self, order_id: int, admin_id: int, reason: str
+    ) -> Optional[Order]:
+        """Reject an order."""
+        order = await self.order_repo.reject_order(order_id, admin_id, reason)
+
+        if order:
+            # Log the admin action
+            await self.admin_action_repo.log_order_rejection(
+                admin_id=admin_id, order_id=order_id, reason=reason
+            )
+
+        return order
+
+    async def complete_order(self, order_id: int) -> Optional[Order]:
+        """Mark order as completed after config delivery."""
+        return await self.order_repo.complete_order(order_id)
+
+    async def count_by_status(self, status: OrderStatus) -> int:
+        """Count orders by status."""
+        return await self.order_repo.count_by_status(status)
+
+    async def count_total(self) -> int:
+        """Count total orders."""
+        return await self.order_repo.count_total()
+
+    async def get_sales_sum(self) -> float:
+        """Get total sales amount for completed orders."""
+        return await self.order_repo.get_sales_sum()
