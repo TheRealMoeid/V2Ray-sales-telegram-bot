@@ -1,9 +1,14 @@
 """Product model."""
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 from sqlalchemy import Integer, String, DateTime, func, Boolean, Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.session import Base
+
+if TYPE_CHECKING:
+    from app.database.models.config import Config
+    from app.database.models.order import Order
 
 
 class Product(Base):
