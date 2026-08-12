@@ -1,0 +1,33 @@
+[project]
+name = "v2ray-sales-bot"
+version = "1.0.0"
+description = "Telegram bot for selling V2Ray/VLESS configurations"
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram>=3.4.0,<4.0.0",
+    "sqlalchemy>=2.0.0,<3.0.0",
+    "asyncpg>=0.29.0,<1.0.0",
+    "alembic>=1.13.0,<2.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+    "aiofiles>=23.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<9.0.0",
+    "pytest-asyncio>=0.23.0,<1.0.0",
+    "ruff>=0.3.0,<1.0.0",
+    "black>=24.0.0,<25.0.0",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
