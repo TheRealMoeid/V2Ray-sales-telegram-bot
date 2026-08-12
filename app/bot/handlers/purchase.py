@@ -8,8 +8,8 @@ from app.database.models.product import Product
 from app.database.models.order import Order, OrderStatus
 from app.database.models.config import Config, ConfigStatus
 from app.bot.keyboards.product_list import ProductListKeyboard
-from app.bot.keyboards.payment_info import PaymentInfoKeyboard
 from app.services.order_service import OrderService
+from app.bot.keyboards.payment_info import PaymentInfoKeyboard
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
