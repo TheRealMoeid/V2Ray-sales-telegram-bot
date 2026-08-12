@@ -18,6 +18,9 @@ async_session_maker = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
 )
 
+# Alias for backward compatibility
+async_session = async_session_maker
+
 
 async def get_db() -> AsyncSession:
     """Get database session."""
