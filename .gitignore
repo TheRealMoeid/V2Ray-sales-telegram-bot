@@ -1,39 +1,33 @@
 ```
+# Environment variables
+.env
+.env.local
+.env.*
+
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-.coverage
-.htmlcov/
-.coverage.*
-.pytest_cache/
-.mypy_cache/
-.hypothesis/
-
-# Virtual Environment
 venv/
-ENV/
-env/
 .venv/
-.env/
+.envrc
+.python-version
+
+# Database
+*.sqlite
+*.db
+
+# Logs
+*.log
+
+# Testing
+.coverage
+coverage/
+htmlcov/
+.pytest_cache/
+.hypothesis/
 
 # IDE
 .vscode/
@@ -42,22 +36,7 @@ env/
 *.swo
 *.tmp
 
-# Logs
-*.log
-
-# Environment
-.env
-.env.local
-.env.*
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Alembic
-alembic/versions/
-
-# Docker
-.dockerenv
+# OS
+.DS_Store
+Thumbs.db
 ```

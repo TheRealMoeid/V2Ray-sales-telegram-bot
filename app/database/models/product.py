@@ -15,15 +15,15 @@ class Product(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    currency: Mapped[str] = mapped_column(String(10), default="تومان", nullable=False)
-    duration: Mapped[int] = mapped_column(Integer, nullable=False)  # in days
-    protocol: Mapped[str] = mapped_column(String(50), default="VLESS", nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), default="تومان")
+    duration: Mapped[int] = mapped_column(Integer, default=30)  # in days
+    protocol: Mapped[str] = mapped_column(String(50), default="VLESS")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     # Relationships

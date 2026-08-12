@@ -25,7 +25,7 @@ class Config(Base):
     )
     config_text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[ConfigStatus] = mapped_column(
-        Enum(ConfigStatus), default=ConfigStatus.AVAILABLE, nullable=False, index=True
+        Enum(ConfigStatus), default=ConfigStatus.AVAILABLE, index=True
     )
     assigned_to_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
@@ -34,7 +34,7 @@ class Config(Base):
         ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, unique=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now()
     )
     assigned_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
