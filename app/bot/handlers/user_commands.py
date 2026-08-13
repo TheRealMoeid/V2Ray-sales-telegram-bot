@@ -94,3 +94,30 @@ async def handle_back_to_menu(callback: CallbackQuery):
     except Exception as e:
         logger.exception(f"Error in handle_back_to_menu: {e}")
         await callback.answer("❌ خطایی رخ داد", show_alert=True)
+        # ----- Reply-keyboard text handlers (main menu buttons) -----
+from aiogram.fsm.context import FSMContext  # noqa: E402
+
+
+async def _no_active_state(event: Message, state: FSMContext) -> bool:
+    """Only handle menu texts when no FSM flow is in progress."""
+    return await state.get_state() is None
+
+
+@router.message(_no_active_state, F.text.contains("راهنما"))
+async def handle_help_text(message: Message):
+    """Handle 'راهنما' reply-keyboard button."""
+    await handle_help(message)
+
+
+@router.message(_no_active_state, F.text.contains("پشتیبانی"))
+async def handle_support_text(message: Message):
+    """Handle 'پشتیبانی' reply-keyboard button."""
+    try:
+        from app.config.settings import settings
+
+        support = getattr(settings, "SUPPORT_USERNAME", None) or getattr(
+            settings, "support_username", "@support"
+        )
+    except Exception:
+        support = "@support"
+    await message.answer(f"💬 برای پشتیبانی با آیدی زیر تماس بگیرید:\n{support}")

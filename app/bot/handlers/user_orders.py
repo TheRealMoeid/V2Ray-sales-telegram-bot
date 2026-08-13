@@ -124,3 +124,49 @@ async def handle_view_order(callback: CallbackQuery, session: AsyncSession):
     except Exception as e:
         logger.error(f"Error in handle_view_order: {e}")
         await callback.answer("❌ خطایی رخ داد", show_alert=True)
+
+# ----- Reply-keyboard text handler for 'سفارش‌های من' -----
+from aiogram import F  # noqa: E402
+from aiogram.fsm.context import FSMContext  # noqa: E402
+from aiogram.types import Message  # noqa: E402
+
+
+async def _no_active_state_orders(event: Message, state: FSMContext) -> bool:
+    return await state.get_state() is None
+
+
+@router.message(_no_active_state_orders, F.text.contains("سفارش‌های من"))
+async def handle_my_orders_text(message: Message):
+    """Handle 'سفارش‌های من' reply-keyboard button."""
+    from sqlalchemy import select
+
+    from app.database.models.order import Order, OrderStatus
+    from app.database.session import async_session_maker
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Order)
+            .where(Order.user_id == message.from_user.id)
+            .order_by(Order.created_at.desc())
+            .limit(10)
+        )
+        orders = result.scalars().all()
+
+    if not orders:
+        await message.answer("📭 شما هنوز سفارشی ندارید.")
+        return
+
+    status_emoji = {
+        OrderStatus.PENDING_PAYMENT: "⏳",
+        OrderStatus.RECEIPT_SUBMITTED: "📤",
+        OrderStatus.APPROVED: "✅",
+        OrderStatus.REJECTED: "❌",
+        OrderStatus.COMPLETED: "✅",
+        OrderStatus.CANCELLED: "🚫",
+    }
+
+    text = "📋 سفارش‌های شما:\n\n"
+    for o in orders:
+        text += f"{status_emoji.get(o.status, '❓')} سفارش #{o.id} — {o.status.value} — {o.amount:,.0f} تومان\n"
+
+    await message.answer(text)

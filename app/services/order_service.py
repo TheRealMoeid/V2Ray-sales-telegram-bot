@@ -115,7 +115,7 @@ class OrderService:
                 .where(Config.status == ConfigStatus.AVAILABLE)
                 .with_for_update(skip_locked=True)
             )
-            config = config_result.scalar_one_or_none()
+            config = config_result.scalars().first()
 
             if not config:
                 raise ValueError("کانفیگ موجود برای این محصول یافت نشد.")

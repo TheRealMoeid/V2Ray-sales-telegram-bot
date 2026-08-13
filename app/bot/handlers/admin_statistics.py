@@ -2,7 +2,7 @@
 import logging
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,36 +14,53 @@ logger = logging.getLogger(__name__)
 router = Router(name="admin_statistics")
 
 
+def _back_to_admin_panel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 بازگشت به پنل", callback_data="admin_panel")]
+        ]
+    )
+
+
 @router.callback_query(F.data == "admin_statistics", AdminFilter())
 async def handle_admin_statistics(callback: CallbackQuery, session: AsyncSession):
     """Handle admin statistics view."""
     try:
-        # Instantiate service and call instance method (Bug #10 fix)
         stats_service = StatisticsService(session)
         stats = await stats_service.get_full_statistics()
 
         stats_text = f"""
 📊 آمار فروشگاه
 
-👥 تعداد کاربران: {stats.get('total_users', 0)}
-🛒 تعداد سفارش‌ها: {stats.get('total_orders', 0)}
-💰 مجموع فروش: {stats.get('total_sales', 0):,} تومان
+👥 کاربران: {stats.get('total_users', 0)}
+🛒 سفارش‌ها: {stats.get('total_orders', 0)}
+💰 مجموع فروش: {stats.get('total_sales', 0):,.0f} تومان
 
-✅ سفارش‌های موفق: {stats.get('completed_orders', 0)}
-⏳ سفارش‌های در انتظار: {stats.get('pending_orders', 0)}
-❌ سفارش‌های رد شده: {stats.get('rejected_orders', 0)}
+✅ موفق: {stats.get('completed_orders', 0)}
+⏳ در انتظار: {stats.get('pending_orders', 0)} + 📤 ارسال شده: {stats.get('submitted_orders', 0) if 'submitted_orders' in stats else 0}
+❌ رد شده: {stats.get('rejected_orders', 0)}
 
-📦 کانفیگ‌های موجود: {stats.get('available_configs', 0)}
-📦 کانفیگ‌های فروخته شده: {stats.get('assigned_configs', 0)}
+📦 موجود: {stats.get('available_configs', 0)} | فروخته: {stats.get('assigned_configs', 0)}
 
 ━━━━━━━━━━━━━━━━━━━━
-
-📈 فروش امروز: {stats.get('today_sales', 0):,} تومان
-📈 فروش این هفته: {stats.get('week_sales', 0):,} تومان
-📈 فروش این ماه: {stats.get('month_sales', 0):,} تومان
+📈 امروز: {stats.get('today_sales', 0):,.0f} تومان
+📈 هفته: {stats.get('week_sales', 0):,.0f} تومان
+📈 ماه: {stats.get('month_sales', 0):,.0f} تومان
 """
 
-        await callback.message.edit_text(text=stats_text)
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="👥 ۱۰ کاربر اخیر", callback_data="admin_users:recent"),
+                    InlineKeyboardButton(text="🛒 آخرین سفارش‌ها", callback_data="admin_orders:page:1"),
+                ],
+                [
+                    InlineKeyboardButton(text="🔙 بازگشت به پنل", callback_data="admin_panel"),
+                ],
+            ]
+        )
+
+        await callback.message.edit_text(text=stats_text, reply_markup=keyboard)
         await callback.answer()
 
     except Exception as e:
@@ -52,36 +69,35 @@ async def handle_admin_statistics(callback: CallbackQuery, session: AsyncSession
 
 
 @router.callback_query(F.data == "admin_users", AdminFilter())
+@router.callback_query(F.data == "admin_users:recent", AdminFilter())
 async def handle_admin_users(callback: CallbackQuery, session: AsyncSession):
     """Handle admin users view."""
     try:
-        # Query user stats directly since StatisticsService doesn't have get_user_statistics (Bug #10 fix)
-        total_users_result = await session.execute(
-            select(func.count()).select_from(User)
-        )
-        total_users = total_users_result.scalar() or 0
+        total_result = await session.execute(select(func.count()).select_from(User))
+        total_users = total_result.scalar() or 0
 
         recent_result = await session.execute(
             select(User).order_by(User.created_at.desc()).limit(10)
         )
         recent_users = recent_result.scalars().all()
 
-        users_text = f"""
-👥 آمار کاربران
+        users_text = f"👥 **آمار کاربران**\n\nتعداد کل: {total_users}\n\n"
+        users_text += "**۱۰ کاربر اخیر:**\n"
 
-تعداد کل کاربران: {total_users}
+        if recent_users:
+            for user in recent_users:
+                name = f"@{user.username}" if user.username else (user.first_name or "بدون نام")
+                users_text += f"• {name} (ID: `{user.telegram_id}`)\n"
+        else:
+            users_text += "_هنوز کاربری ثبت‌نام نکرده._"
 
-کاربران جدید (۱۰ نفر آخر):
-"""
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 بازگشت به پنل", callback_data="admin_panel")]
+            ]
+        )
 
-        for user in recent_users:
-            username = f"@{user.username}" if user.username else user.first_name
-            users_text += f"\n• {username} (ID: {user.telegram_id})"
-
-        if not recent_users:
-            users_text += "\nهنوز کاربری ثبت‌نام نکرده است."
-
-        await callback.message.edit_text(text=users_text)
+        await callback.message.edit_text(text=users_text, reply_markup=keyboard, parse_mode="Markdown")
         await callback.answer()
 
     except Exception as e:

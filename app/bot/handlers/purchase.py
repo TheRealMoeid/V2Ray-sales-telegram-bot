@@ -203,3 +203,36 @@ async def handle_retry_payment(callback: CallbackQuery, session: AsyncSession):
     except Exception as e:
         logger.exception(f"Error in handle_retry_payment: {e}")
         await callback.answer("❌ خطایی رخ داد", show_alert=True)
+
+    # ----- Reply-keyboard text handler for 'خرید کانفیگ' -----
+from aiogram.fsm.context import FSMContext  # noqa: E402
+from aiogram.types import Message  # noqa: E402
+
+
+async def _no_active_state_purchase(event: Message, state: FSMContext) -> bool:
+    return await state.get_state() is None
+
+
+@router.message(_no_active_state_purchase, F.text.contains("خرید کانفیگ"))
+async def handle_buy_config_text(message: Message):
+    """Handle 'خرید کانفیگ' reply-keyboard button."""
+    from sqlalchemy import select
+
+    from app.bot.keyboards.product_list import ProductListKeyboard
+    from app.database.models.product import Product
+    from app.database.session import async_session_maker
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Product).where(Product.is_active == True)
+        )
+        products = result.scalars().all()
+
+    if not products:
+        await message.answer("❌ در حال حاضر محصولی موجود نیست.")
+        return
+
+    await message.answer(
+        text="🛒 محصولات موجود:\n\nمحصول مورد نظر را انتخاب کنید:",
+        reply_markup=ProductListKeyboard.get_product_list(products),
+    )
