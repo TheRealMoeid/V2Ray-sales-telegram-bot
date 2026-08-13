@@ -76,3 +76,12 @@ class ConfigService:
     ) -> Optional[Config]:
         """Get first available config for a product (for atomic assignment)."""
         return await self.config_repo.get_first_available_for_product(product_id)
+
+    @staticmethod
+    async def get_all_products(session: AsyncSession) -> List:
+        """Get all products."""
+        from sqlalchemy import select
+        from app.database.models.product import Product
+        
+        result = await session.execute(select(Product))
+        return result.scalars().all()

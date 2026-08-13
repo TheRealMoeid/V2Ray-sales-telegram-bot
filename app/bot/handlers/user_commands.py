@@ -3,7 +3,7 @@ import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
-from app.bot.keyboards.main_menu import MainMenuKeyboard
+from app.bot.keyboards.main_menu import MainKeyboard
 from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ async def handle_start(message: Message, session):
         
         await message.answer(
             text=welcome_text,
-            reply_markup=MainMenuKeyboard.get_main_menu_keyboard(),
+            reply_markup=MainKeyboard.get_menu(),
         )
         
         logger.info(f"User {message.from_user.id} started the bot")
@@ -72,7 +72,7 @@ async def handle_back_to_menu(callback: CallbackQuery, session):
     try:
         await callback.message.edit_text(
             text="🏠 منوی اصلی",
-            reply_markup=MainMenuKeyboard.get_main_menu_keyboard(),
+            reply_markup=MainKeyboard.get_menu(),
         )
         await callback.answer()
     except Exception as e:
