@@ -3,11 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-<<<<<<< HEAD
-from sqlalchemy import BigInteger, String, DateTime, func, Boolean, Numeric, Integer
-=======
 from sqlalchemy import BigInteger, Boolean, DateTime, Integer, Numeric, String, func
->>>>>>> 1f3dccd (fix: apply full code review fixes (bugs 1-23))
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.session import Base

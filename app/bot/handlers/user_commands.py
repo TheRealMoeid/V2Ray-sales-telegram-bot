@@ -1,19 +1,11 @@
 """User command handlers."""
 import logging
-<<<<<<< HEAD
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.filters import Command
-from app.bot.keyboards.main_menu import MainKeyboard
-from app.services.user_service import UserService
-=======
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
 from app.bot.keyboards.main_menu import MainKeyboard
->>>>>>> 1f3dccd (fix: apply full code review fixes (bugs 1-23))
 from app.database.session import async_session_maker
 from app.services.user_service import UserService
 
@@ -44,23 +36,11 @@ async def handle_start(message: Message):
         welcome_text = f"👋 سلام {user_obj.first_name or 'دوست عزیز'}!\n\n"
         welcome_text += "به فروشگاه کانفیگ V2Ray خوش آمدید.\n"
         welcome_text += "از منوی زیر می‌توانید خرید کنید یا سفارش‌های خود را مشاهده کنید."
-<<<<<<< HEAD
-        
-        await message.answer(
-            text=welcome_text,
-            reply_markup=MainKeyboard.get_menu(),
-        )
-        
-        logger.info(f"User {message.from_user.id} started the bot")
-        
-=======
 
         await message.answer(text=welcome_text, reply_markup=MainKeyboard.get_menu())
 
-        action = "registered" if created else "started"
-        logger.info(f"User {user_obj.id} {action}")
+        logger.info(f"User {user_obj.id} {'registered' if created else 'started'}")
 
->>>>>>> 1f3dccd (fix: apply full code review fixes (bugs 1-23))
     except Exception as e:
         logger.exception(f"Error in handle_start: {e}")
         await message.answer("❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.")
@@ -101,35 +81,15 @@ async def handle_help(message: Message):
 
 @router.callback_query(F.data == "back_to_menu")
 async def handle_back_to_menu(callback: CallbackQuery):
-<<<<<<< HEAD
     """Handle back to main menu callback."""
-    try:
-        await callback.message.edit_text(
-            text="🏠 منوی اصلی",
-            reply_markup=MainKeyboard.get_menu(),
-        )
-=======
-    """Handle back to main menu callback.
-
-    Telegram API does not allow ReplyKeyboardMarkup on edit_message_text.
-    So we edit the text without keyboard, then send a new message with the keyboard.
-    """
     try:
         msg = callback.message
         if msg is None:
             await callback.answer()
             return
 
-        # Edit the message text without keyboard (Telegram API restriction)
         await msg.edit_text(text="🏠 منوی اصلی")
-
-        # Send a new message with the reply keyboard
-        await msg.answer(
-            text="منوی اصلی:",
-            reply_markup=MainKeyboard.get_menu()
-        )
-
->>>>>>> 1f3dccd (fix: apply full code review fixes (bugs 1-23))
+        await msg.answer(text="منوی اصلی:", reply_markup=MainKeyboard.get_menu())
         await callback.answer()
     except Exception as e:
         logger.exception(f"Error in handle_back_to_menu: {e}")
