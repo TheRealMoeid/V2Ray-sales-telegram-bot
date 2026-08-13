@@ -25,15 +25,21 @@ def get_real_admin_id() -> int:
     if not admin_ids_raw:
         print("❌ Error: ADMIN_IDS environment variable is not set.")
         print("   Please set ADMIN_IDS in your .env file before running seed.")
-        print("   Example: ADMIN_IDS=123456789,987654321")
         sys.exit(1)
 
+    # If Settings already parsed it into a list, take the first element
+    if isinstance(admin_ids_raw, (list, tuple)):
+        try:
+            return int(admin_ids_raw[0])
+        except (IndexError, ValueError, TypeError):
+            print(f"❌ Error: Invalid ADMIN_IDS format: {admin_ids_raw}")
+            sys.exit(1)
+
+    # If it's a raw string like "123,456", split and take the first
     try:
-        first_admin_id = int(str(admin_ids_raw).split(",")[0].strip())
-        return first_admin_id
-    except (ValueError, IndexError) as e:
+        return int(str(admin_ids_raw).split(",")[0].strip())
+    except (ValueError, IndexError):
         print(f"❌ Error: Invalid ADMIN_IDS format: {admin_ids_raw}")
-        print(f"   Details: {e}")
         sys.exit(1)
 
 
