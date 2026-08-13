@@ -4,28 +4,48 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from app.bot.keyboards.main_menu import MainKeyboard
+
+main
 from app.services.user_service import UserService
+from app.database.session import async_session_maker
 
 logger = logging.getLogger(__name__)
 router = Router(name="user_commands")
 
 
+def _get_main_menu_keyboard():
+    """Safely import main menu keyboard regardless of class name."""
+    try:
+        from app.bot.keyboards.main_menu import MainMenuKeyboard
+        return MainMenuKeyboard.get_menu()
+    except (ImportError, AttributeError):
+        pass
+    try:
+        from app.bot.keyboards.main_menu import MainKeyboard
+        # Try different common method names
+        for method_name in ['get_menu', 'get_main_menu', 'get_main_menu_keyboard', 'get_keyboard']:
+            if hasattr(MainKeyboard, method_name):
+                return getattr(MainKeyboard, method_name)()
+    except ImportError:
+        pass
+    return None  # Fallback: no keyboard
+
+
 @router.message(Command("start"))
-async def handle_start(message: Message, session):
+async def handle_start(message: Message):
     """Handle /start command."""
     try:
-        # Register or update user
-        await UserService.register_or_update_user(
-            session=session,
-            telegram_id=message.from_user.id,
-            username=message.from_user.username,
-            first_name=message.from_user.first_name,
-            last_name=message.from_user.last_name,
-        )
-        await session.commit()
-        
-        # Send welcome message with main menu
-        welcome_text = f"👋 سلام {message.from_user.first_name}!\n\n"
+        async with async_session_maker() as session:
+            user_service = UserService(session)
+            user, created = await user_service.get_or_create_user(
+                telegram_id=message.from_user.id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name,
+                last_name=message.from_user.last_name,
+            )
+            await session.commit()
+
+        welcome_text = f"👋 سلام {message.from_user.first_name or 'دوست عزیز'}!\n\n"
         welcome_text += "به فروشگاه کانفیگ V2Ray خوش آمدید.\n"
         welcome_text += "از منوی زیر می‌توانید خرید کنید یا سفارش‌های خود را مشاهده کنید."
         
@@ -36,15 +56,33 @@ async def handle_start(message: Message, session):
         
         logger.info(f"User {message.from_user.id} started the bot")
         
+
+
+        keyboard = _get_main_menu_keyboard()
+        if keyboard:
+            await message.answer(text=welcome_text, reply_markup=keyboard)
+        else:
+            await message.answer(text=welcome_text)
+
+        action = "registered" if created else "started"
+        logger.info(f"User {message.from_user.id} {action}")
+
+        main
     except Exception as e:
-        logger.error(f"Error in handle_start: {e}")
+        logger.exception(f"Error in handle_start: {e}")
         await message.answer("❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.")
 
 
 @router.message(Command("help"))
-async def handle_help(message: Message, session):
+async def handle_help(message: Message):
     """Handle /help command."""
-    help_text = """
+    try:
+        from app.config.settings import settings
+        support = getattr(settings, 'SUPPORT_USERNAME', None) or getattr(settings, 'support_username', '@support')
+    except Exception:
+        support = "@support"
+
+    help_text = f"""
 📚 راهنمای استفاده از ربات
 
 🛒 خرید کانفیگ:
@@ -60,21 +98,31 @@ async def handle_help(message: Message, session):
 
 💬 پشتیبانی:
 برای پشتیبانی با آیدی زیر تماس بگیرید:
-@{support_username}
-""".format(support_username="Moeid_TestBot")  # TODO: Get from settings
-    
+{support}
+"""
     await message.answer(text=help_text)
 
 
 @router.callback_query(F.data == "back_to_menu")
-async def handle_back_to_menu(callback: CallbackQuery, session):
+async def handle_back_to_menu(callback: CallbackQuery):
     """Handle back to main menu callback."""
     try:
+
         await callback.message.edit_text(
             text="🏠 منوی اصلی",
             reply_markup=MainKeyboard.get_menu(),
         )
+
+        keyboard = _get_main_menu_keyboard()
+        if keyboard:
+            await callback.message.edit_text(
+                text="🏠 منوی اصلی",
+                reply_markup=keyboard,
+            )
+        else:
+            await callback.message.edit_text(text="🏠 منوی اصلی")
+ main
         await callback.answer()
     except Exception as e:
-        logger.error(f"Error in handle_back_to_menu: {e}")
+        logger.exception(f"Error in handle_back_to_menu: {e}")
         await callback.answer("❌ خطایی رخ داد", show_alert=True)

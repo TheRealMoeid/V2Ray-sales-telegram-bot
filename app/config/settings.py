@@ -54,6 +54,9 @@ class Settings:
 
         # Logging
         self.LOG_LEVEL: str = log_level or os.getenv("LOG_LEVEL", "INFO")
+        # lowercase aliases so both settings.bot_token and settings.BOT_TOKEN work
+        for _name in list(vars(self)):
+            setattr(self, _name.lower(), getattr(self, _name))
 
     def validate(self) -> bool:
         """Validate required settings."""
