@@ -1,11 +1,16 @@
 """Order service."""
 
+from datetime import datetime
 from typing import Optional, Tuple
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database.repositories.order_repository import OrderRepository
+
+from app.database.models.config import Config, ConfigStatus
 from app.database.models.order import Order, OrderStatus
-from app.database.repositories.config_repository import ConfigRepository
 from app.database.repositories.admin_action_repository import AdminActionRepository
+from app.database.repositories.config_repository import ConfigRepository
+from app.database.repositories.order_repository import OrderRepository
 
 
 class OrderService:
@@ -32,11 +37,14 @@ class OrderService:
     @staticmethod
     async def user_has_pending_order(session: AsyncSession, user_id: int) -> bool:
         """Check if user has pending order."""
-        from sqlalchemy import select
         result = await session.execute(
             select(Order)
             .where(Order.user_id == user_id)
-            .where(Order.status.in_([OrderStatus.PENDING_PAYMENT, OrderStatus.RECEIPT_SUBMITTED]))
+            .where(
+                Order.status.in_(
+                    [OrderStatus.PENDING_PAYMENT, OrderStatus.RECEIPT_SUBMITTED]
+                )
+            )
         )
         return result.scalar_one_or_none() is not None
 
@@ -79,60 +87,60 @@ class OrderService:
         session: AsyncSession,
         order_id: int,
         admin_id: int,
-    ) -> Optional[str]:
+    ) -> Optional[Tuple[str, int]]:
         """
         Approve an order and assign a config atomically.
-        Returns config_text if successful, None otherwise.
-        """
-        from sqlalchemy import select
         
+        Returns:
+            Tuple of (config_text, buyer_telegram_id) if successful, None otherwise.
+            buyer_telegram_id is needed to send the config to the customer (Bug #4 fix).
+        """
         async with session.begin():
             # Get the order with lock
             result = await session.execute(
                 select(Order).where(Order.id == order_id).with_for_update()
             )
             order = result.scalar_one_or_none()
-            
+
             if not order:
                 raise ValueError("سفارش یافت نشد.")
-            
+
             if order.status != OrderStatus.RECEIPT_SUBMITTED:
                 raise ValueError("وضعیت سفارش برای تأیید مناسب نیست.")
-            
+
             # Find an available config for this order's product
             config_result = await session.execute(
                 select(Config)
                 .where(Config.product_id == order.product_id)
-                .where(Config.status == "AVAILABLE")
+                .where(Config.status == ConfigStatus.AVAILABLE)
                 .with_for_update(skip_locked=True)
             )
             config = config_result.scalar_one_or_none()
-            
+
             if not config:
                 raise ValueError("کانفیگ موجود برای این محصول یافت نشد.")
-            
+
             # Assign the config
             config.status = ConfigStatus.ASSIGNED
             config.assigned_to_user_id = order.user_id
             config.order_id = order.id
-            
-            from datetime import datetime
             config.assigned_at = datetime.utcnow()
-            
+
             # Update order status
             order.status = OrderStatus.COMPLETED
             order.admin_id = admin_id
             order.approved_at = datetime.utcnow()
-            
+
             await session.flush()
-            
+
             # Log the admin action
             admin_action_repo = AdminActionRepository(session)
             await admin_action_repo.log_order_approval(
                 admin_id=admin_id, order_id=order_id, config_id=config.id
             )
-            
-            return config.config_text
+
+            # Return both config_text AND buyer's Telegram ID (Bug #4 fix)
+            return config.config_text, order.user_id
 
     @staticmethod
     async def reject_order(
@@ -142,35 +150,29 @@ class OrderService:
         reason: str,
     ) -> Optional[Order]:
         """Reject an order."""
-        from sqlalchemy import select
-        
         async with session.begin():
             result = await session.execute(
                 select(Order).where(Order.id == order_id).with_for_update()
             )
             order = result.scalar_one_or_none()
-            
+
             if not order:
                 return None
-            
+
             order.status = OrderStatus.REJECTED
             order.admin_id = admin_id
             order.rejected_at = datetime.utcnow()
             order.rejection_reason = reason
-            
+
             await session.flush()
-            
+
             # Log the admin action
             admin_action_repo = AdminActionRepository(session)
             await admin_action_repo.log_order_rejection(
                 admin_id=admin_id, order_id=order_id, reason=reason
             )
-            
-            return order
 
-    async def complete_order(self, order_id: int) -> Optional[Order]:
-        """Mark order as completed after config delivery."""
-        return await self.order_repo.complete_order(order_id)
+            return order
 
     async def count_by_status(self, status: OrderStatus) -> int:
         """Count orders by status."""

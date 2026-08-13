@@ -2,8 +2,11 @@
 
 from datetime import datetime
 from enum import Enum as PyEnum
-from sqlalchemy import BigInteger, String, DateTime, func, ForeignKey, Enum, Numeric
+from typing import Optional
+
+from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database.session import Base
 
 
@@ -25,8 +28,8 @@ class Order(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+        BigInteger, nullable=False, index=True
+    )  # Telegram ID, no FK
     product_id: Mapped[int] = mapped_column(
         ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -38,9 +41,9 @@ class Order(Base):
     )
     receipt_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     receipt_file_unique_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    admin_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
-    )
+    admin_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, nullable=True
+    )  # Telegram ID, no FK
     rejection_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -48,31 +51,27 @@ class Order(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rejected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
-    user: Mapped["User"] = relationship(
-        "User", 
-        back_populates="orders",
-        foreign_keys=[user_id]
-    )
+    # Note: No direct relationship to User because user_id stores Telegram ID, not users.id
+    # When user info is needed, query User table with telegram_id=user_id
     product: Mapped["Product"] = relationship("Product", back_populates="orders")
-    admin: Mapped["User | None"] = relationship(
-        "User", 
-        foreign_keys=[admin_id], 
-        back_populates="admin_orders"
-    )
     config: Mapped["Config | None"] = relationship(
-        "Config", 
+        "Config",
         back_populates="order",
-        foreign_keys="[Config.order_id]"
+        foreign_keys="[Config.order_id]",
     )
     receipt: Mapped["PaymentReceipt | None"] = relationship(
-        "PaymentReceipt", 
-        back_populates="order", 
+        "PaymentReceipt",
+        back_populates="order",
         uselist=False,
-        foreign_keys="[PaymentReceipt.order_id]"
+        foreign_keys="[PaymentReceipt.order_id]",
     )
 
     def __repr__(self) -> str:

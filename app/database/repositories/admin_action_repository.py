@@ -1,8 +1,10 @@
 """Admin action repository."""
 
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.database.models.admin_action import AdminAction
 
 
@@ -26,7 +28,7 @@ class AdminActionRepository:
             action=action,
             target_type=target_type,
             target_id=target_id,
-            metadata=metadata,
+            action_metadata=metadata,  # ✅ Bug #13 fix: action_metadata, not metadata
         )
         self.session.add(admin_action)
         await self.session.flush()
@@ -80,7 +82,9 @@ class AdminActionRepository:
             metadata={"product_id": product_id} if product_id else None,
         )
 
-    async def get_admin_actions(self, admin_id: int, limit: int = 50) -> list[AdminAction]:
+    async def get_admin_actions(
+        self, admin_id: int, limit: int = 50
+    ) -> list[AdminAction]:
         """Get recent actions by an admin."""
         result = await self.session.execute(
             select(AdminAction)

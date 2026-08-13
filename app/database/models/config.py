@@ -2,8 +2,10 @@
 
 from datetime import datetime
 from enum import Enum as PyEnum
-from sqlalchemy import BigInteger, String, DateTime, func, ForeignKey, Enum, Text
+
+from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database.session import Base
 
 
@@ -28,8 +30,8 @@ class Config(Base):
         Enum(ConfigStatus), default=ConfigStatus.AVAILABLE, index=True
     )
     assigned_to_user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
-    )
+        BigInteger, nullable=True, index=True
+    )  # Telegram ID, no FK (Bug #3 fix)
     order_id: Mapped[int | None] = mapped_column(
         ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, unique=True, index=True
     )
@@ -42,16 +44,13 @@ class Config(Base):
 
     # Relationships
     product: Mapped["Product"] = relationship("Product", back_populates="configs")
-    assigned_user: Mapped["User | None"] = relationship(
-        "User", 
-        back_populates="configs", 
-        foreign_keys=[assigned_to_user_id]
-    )
     order: Mapped["Order | None"] = relationship(
-        "Order", 
+        "Order",
         back_populates="config",
-        foreign_keys=[order_id]
+        foreign_keys=[order_id],
     )
+    # Note: no `assigned_user` relationship here. User.configs (viewonly with
+    # primaryjoin on telegram_id) covers reads; query User explicitly when needed.
 
     def __repr__(self) -> str:
         return f"<Config(id={self.id}, status={self.status}, product_id={self.product_id})>"

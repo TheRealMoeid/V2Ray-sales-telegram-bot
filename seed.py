@@ -7,20 +7,34 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-
 from sqlalchemy import select, inspect
-from app.database.session import init_db, async_session_maker
-from app.database.models.user import User
-from app.database.models.product import Product
-from app.database.models.config import Config
 
-# Try to import settings for real admin ID
-try:
-    from app.config.settings import settings
-    ADMIN_IDS_RAW = getattr(settings, 'ADMIN_IDS', None) or getattr(settings, 'admin_ids', None)
-    REAL_ADMIN_ID = int(str(ADMIN_IDS_RAW).split(',')[0].strip()) if ADMIN_IDS_RAW else 931702347
-except Exception:
-    REAL_ADMIN_ID = 931702347
+from app.config.settings import settings
+from app.database.models.config import Config
+from app.database.models.product import Product
+from app.database.models.user import User
+from app.database.session import async_session_maker, init_db
+
+
+def get_real_admin_id() -> int:
+    """Get the real admin ID from settings, fail if not configured."""
+    admin_ids_raw = getattr(settings, "ADMIN_IDS", None) or getattr(
+        settings, "admin_ids", None
+    )
+
+    if not admin_ids_raw:
+        print("❌ Error: ADMIN_IDS environment variable is not set.")
+        print("   Please set ADMIN_IDS in your .env file before running seed.")
+        print("   Example: ADMIN_IDS=123456789,987654321")
+        sys.exit(1)
+
+    try:
+        first_admin_id = int(str(admin_ids_raw).split(",")[0].strip())
+        return first_admin_id
+    except (ValueError, IndexError) as e:
+        print(f"❌ Error: Invalid ADMIN_IDS format: {admin_ids_raw}")
+        print(f"   Details: {e}")
+        sys.exit(1)
 
 
 def get_model_columns(model_class):
@@ -40,12 +54,12 @@ def safe_create(model_class, **kwargs):
 
     # Fallbacks: map common alternative names to each other
     FALLBACKS = {
-        'duration_days': ['duration', 'duration_in_days', 'validity_days', 'days'],
-        'duration': ['duration_days', 'duration_in_days', 'validity_days', 'days'],
-        'is_active': ['active', 'enabled'],
-        'active': ['is_active', 'enabled'],
-        'telegram_id': ['tg_id', 'user_id'],
-        'username': ['user_name'],
+        "duration_days": ["duration", "duration_in_days", "validity_days", "days"],
+        "duration": ["duration_days", "duration_in_days", "validity_days", "days"],
+        "is_active": ["active", "enabled"],
+        "active": ["is_active", "enabled"],
+        "telegram_id": ["tg_id", "user_id"],
+        "username": ["user_name"],
     }
 
     for key, value in kwargs.items():
@@ -76,6 +90,9 @@ async def seed_data():
     """Seed database with initial data."""
     await init_db()
 
+    # Get admin ID from settings (fails if not configured - Bug #23 fix)
+    real_admin_id = get_real_admin_id()
+
     async with async_session_maker() as session:
         try:
             # Check if data already exists
@@ -85,8 +102,9 @@ async def seed_data():
                 return
 
             # Create admin user
-            admin_user = safe_create(User,
-                telegram_id=REAL_ADMIN_ID,
+            admin_user = safe_create(
+                User,
+                telegram_id=real_admin_id,
                 username="therealMoeid",
                 first_name="Moeid",
                 last_name=None,
@@ -154,8 +172,8 @@ async def seed_data():
 
             print(f"✅ Seeded {len(products)} products")
             print(f"✅ Seeded {len(sample_configs)} configs")
-            print(f"✅ Created admin user (Telegram ID: {REAL_ADMIN_ID})")
-            print(f"\n🎉 Go to Telegram and run /start on @{ 'Moeid_TestBot' }")
+            print(f"✅ Created admin user (Telegram ID: {real_admin_id})")
+            print(f"\n🎉 Go to Telegram and run /start on @Moeid_TestBot")
 
         except Exception as e:
             await session.rollback()
