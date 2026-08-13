@@ -179,19 +179,20 @@ class TestOrderService:
         """Test creating an order."""
         from app.services.order_service import OrderService
         from app.database.models.order import OrderStatus
+        from app.database.repositories.order_repository import OrderRepository
         
         mock_session = AsyncMock()
-        order_service = OrderService(mock_session)
         
         # Mock the repository response
-        with patch.object(order_service.order_repo, 'create', return_value=MagicMock(
+        with patch.object(OrderRepository, 'create', return_value=MagicMock(
             id=1,
             user_id=123456789,
             product_id=1,
             amount=150000,
             status=OrderStatus.PENDING_PAYMENT.value
         )):
-            order = await order_service.create_order(
+            order = await OrderService.create_order(
+                session=mock_session,
                 user_id=123456789,
                 product_id=1,
                 amount=150000,

@@ -1,7 +1,7 @@
 """Product model."""
 
 from datetime import datetime
-from sqlalchemy import BigInteger, String, DateTime, func, Boolean, Numeric
+from sqlalchemy import BigInteger, String, DateTime, func, Boolean, Numeric, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.session import Base
 
