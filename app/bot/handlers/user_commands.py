@@ -4,31 +4,11 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from app.bot.keyboards.main_menu import MainKeyboard
-
-main
 from app.services.user_service import UserService
 from app.database.session import async_session_maker
 
 logger = logging.getLogger(__name__)
 router = Router(name="user_commands")
-
-
-def _get_main_menu_keyboard():
-    """Safely import main menu keyboard regardless of class name."""
-    try:
-        from app.bot.keyboards.main_menu import MainMenuKeyboard
-        return MainMenuKeyboard.get_menu()
-    except (ImportError, AttributeError):
-        pass
-    try:
-        from app.bot.keyboards.main_menu import MainKeyboard
-        # Try different common method names
-        for method_name in ['get_menu', 'get_main_menu', 'get_main_menu_keyboard', 'get_keyboard']:
-            if hasattr(MainKeyboard, method_name):
-                return getattr(MainKeyboard, method_name)()
-    except ImportError:
-        pass
-    return None  # Fallback: no keyboard
 
 
 @router.message(Command("start"))
@@ -56,18 +36,6 @@ async def handle_start(message: Message):
         
         logger.info(f"User {message.from_user.id} started the bot")
         
-
-
-        keyboard = _get_main_menu_keyboard()
-        if keyboard:
-            await message.answer(text=welcome_text, reply_markup=keyboard)
-        else:
-            await message.answer(text=welcome_text)
-
-        action = "registered" if created else "started"
-        logger.info(f"User {message.from_user.id} {action}")
-
-        main
     except Exception as e:
         logger.exception(f"Error in handle_start: {e}")
         await message.answer("❌ خطایی رخ داد. لطفاً دوباره تلاش کنید.")
@@ -107,21 +75,10 @@ async def handle_help(message: Message):
 async def handle_back_to_menu(callback: CallbackQuery):
     """Handle back to main menu callback."""
     try:
-
         await callback.message.edit_text(
             text="🏠 منوی اصلی",
             reply_markup=MainKeyboard.get_menu(),
         )
-
-        keyboard = _get_main_menu_keyboard()
-        if keyboard:
-            await callback.message.edit_text(
-                text="🏠 منوی اصلی",
-                reply_markup=keyboard,
-            )
-        else:
-            await callback.message.edit_text(text="🏠 منوی اصلی")
- main
         await callback.answer()
     except Exception as e:
         logger.exception(f"Error in handle_back_to_menu: {e}")
