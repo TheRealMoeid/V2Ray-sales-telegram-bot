@@ -29,16 +29,31 @@ class OrderService:
         """Get pending orders for a user."""
         return await self.order_repo.get_pending_orders_for_user(user_id)
 
+    @staticmethod
+    async def user_has_pending_order(session: AsyncSession, user_id: int) -> bool:
+        """Check if user has pending order."""
+        from sqlalchemy import select
+        result = await session.execute(
+            select(Order)
+            .where(Order.user_id == user_id)
+            .where(Order.status.in_([OrderStatus.PENDING_PAYMENT, OrderStatus.RECEIPT_SUBMITTED]))
+        )
+        return result.scalar_one_or_none() is not None
+
+    @staticmethod
     async def create_order(
-        self,
+        session: AsyncSession,
         user_id: int,
         product_id: int,
         amount: float,
         currency: str,
-        unit_price: float,
+        unit_price: Optional[float] = None,
     ) -> Order:
         """Create a new order."""
-        return await self.order_repo.create(
+        if unit_price is None:
+            unit_price = amount
+        repo = OrderRepository(session)
+        return await repo.create(
             user_id=user_id,
             product_id=product_id,
             amount=amount,
@@ -59,66 +74,99 @@ class OrderService:
             receipt_file_unique_id=receipt_file_unique_id,
         )
 
-    async def approve_order_and_assign_config(
-        self, order_id: int, admin_id: int
-    ) -> Tuple[Optional[Order], Optional[int], str]:
+    @staticmethod
+    async def approve_order_with_config_assignment(
+        session: AsyncSession,
+        order_id: int,
+        admin_id: int,
+    ) -> Optional[str]:
         """
         Approve an order and assign a config atomically.
-        Returns (order, config_id, error_message).
-        Error message is empty if successful.
+        Returns config_text if successful, None otherwise.
         """
-        # Start atomic operation
-        async with self.session.begin_nested():
-            # Approve the order
-            order, error = await self.order_repo.approve_order(order_id, admin_id)
-
-            if not order:
-                return None, None, error or "Order not found"
-
-            if error:
-                return order, None, error
-
-            # Find an available config for this order's product
-            config = await self.config_repo.get_first_available_for_product(
-                order.product_id, with_lock=True
+        from sqlalchemy import select
+        
+        async with session.begin():
+            # Get the order with lock
+            result = await session.execute(
+                select(Order).where(Order.id == order_id).with_for_update()
             )
-
+            order = result.scalar_one_or_none()
+            
+            if not order:
+                raise ValueError("سفارش یافت نشد.")
+            
+            if order.status != OrderStatus.RECEIPT_SUBMITTED:
+                raise ValueError("وضعیت سفارش برای تأیید مناسب نیست.")
+            
+            # Find an available config for this order's product
+            config_result = await session.execute(
+                select(Config)
+                .where(Config.product_id == order.product_id)
+                .where(Config.status == "AVAILABLE")
+                .with_for_update(skip_locked=True)
+            )
+            config = config_result.scalar_one_or_none()
+            
             if not config:
-                # Rollback the approval since no config is available
-                # This should not happen in normal flow, but handle it
-                return order, None, "No available config found for this product"
-
+                raise ValueError("کانفیگ موجود برای این محصول یافت نشد.")
+            
             # Assign the config
-            config.status = "ASSIGNED"
+            config.status = ConfigStatus.ASSIGNED
             config.assigned_to_user_id = order.user_id
             config.order_id = order.id
-
+            
             from datetime import datetime
-
             config.assigned_at = datetime.utcnow()
-
-            await self.session.flush()
-
+            
+            # Update order status
+            order.status = OrderStatus.COMPLETED
+            order.admin_id = admin_id
+            order.approved_at = datetime.utcnow()
+            
+            await session.flush()
+            
             # Log the admin action
-            await self.admin_action_repo.log_order_approval(
+            admin_action_repo = AdminActionRepository(session)
+            await admin_action_repo.log_order_approval(
                 admin_id=admin_id, order_id=order_id, config_id=config.id
             )
+            
+            return config.config_text
 
-            return order, config.id, ""
-
+    @staticmethod
     async def reject_order(
-        self, order_id: int, admin_id: int, reason: str
+        session: AsyncSession,
+        order_id: int,
+        admin_id: int,
+        reason: str,
     ) -> Optional[Order]:
         """Reject an order."""
-        order = await self.order_repo.reject_order(order_id, admin_id, reason)
-
-        if order:
+        from sqlalchemy import select
+        
+        async with session.begin():
+            result = await session.execute(
+                select(Order).where(Order.id == order_id).with_for_update()
+            )
+            order = result.scalar_one_or_none()
+            
+            if not order:
+                return None
+            
+            order.status = OrderStatus.REJECTED
+            order.admin_id = admin_id
+            order.rejected_at = datetime.utcnow()
+            order.rejection_reason = reason
+            
+            await session.flush()
+            
             # Log the admin action
-            await self.admin_action_repo.log_order_rejection(
+            admin_action_repo = AdminActionRepository(session)
+            await admin_action_repo.log_order_rejection(
                 admin_id=admin_id, order_id=order_id, reason=reason
             )
-
-        return order
+            
+            return order
 
     async def complete_order(self, order_id: int) -> Optional[Order]:
         """Mark order as completed after config delivery."""

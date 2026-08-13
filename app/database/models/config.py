@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum as PyEnum
-from sqlalchemy import Integer, String, DateTime, func, ForeignKey, Enum, Text
+from sqlalchemy import BigInteger, String, DateTime, func, ForeignKey, Enum, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.session import Base
 
@@ -19,7 +19,7 @@ class Config(Base):
 
     __tablename__ = "configs"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     product_id: Mapped[int] = mapped_column(
         ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
     )

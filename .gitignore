@@ -1,4 +1,15 @@
 ```
+# Compiled Python files
+*.pyc
+__pycache__/
+
+# Virtual environments
+venv/
+.venv/
+.env
+.env.local
+*.env.*
+
 # Python
 __pycache__/
 *.py[cod]
@@ -29,22 +40,37 @@ MANIFEST
 .venv/
 venv/
 ENV/
+main
 
 # Testing
+.pytest_cache/
 .coverage
 coverage/
 htmlcov/
+
 .nyc_output/
 .mypy_cache/
 .pytest_cache/
 .hypothesis/
+ main
 
-# IDE
+# Logs
+*.log
+
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
 *.tmp
+
+# Dependencies
+node_modules/
+.mypy_cache/
+target/
+.gradle/
+dist/
+build/
 
 # OS
 .DS_Store
@@ -52,4 +78,5 @@ Thumbs.db
 
 # Logs
 *.log
+main
 ```

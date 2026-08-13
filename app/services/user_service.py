@@ -31,6 +31,26 @@ class UserService:
             last_name=last_name,
         )
 
+    @staticmethod
+    async def register_or_update_user(
+        session: AsyncSession,
+        telegram_id: int,
+        username: Optional[str] = None,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+    ) -> Tuple[User, bool]:
+        """
+        Static method for registering or updating a user.
+        Returns (user, created) tuple.
+        """
+        repo = UserRepository(session)
+        return await repo.get_or_create(
+            telegram_id=telegram_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+        )
+
     async def get_user_by_telegram_id(self, telegram_id: int) -> Optional[User]:
         """Get user by Telegram ID."""
         return await self.user_repo.get_by_telegram_id(telegram_id)
