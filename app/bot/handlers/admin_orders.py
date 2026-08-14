@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 router = Router(name="admin_orders")
 
 
+def _escape_markdown(text: str) -> str:
+    """Escape legacy-Markdown special characters in dynamic values so
+    they can't be misread as formatting delimiters by Telegram's parser
+    (e.g. OrderStatus values like RECEIPT_SUBMITTED/PENDING_PAYMENT
+    contain '_', which broke unescaped Markdown parsing)."""
+    for ch in ("_", "*", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
 async def _render_orders_list(callback: CallbackQuery, session: AsyncSession, page: int, status_filter: str | None = None):
     """Helper to render paginated orders list."""
     base_query = select(Order).order_by(Order.created_at.desc())
@@ -130,18 +140,22 @@ async def handle_admin_view_order(callback: CallbackQuery, session: AsyncSession
         )
         product = product_result.scalar_one_or_none()
 
+        buyer_display = ('@' + user.username) if user and user.username else (user.first_name if user else 'نامشخص')
+        product_name = product.name if product else 'نامشخص'
+        status_display = order.status.value
+
         order_details = f"""
 🧾 سفارش #{order.id}
 
 👤 **خریدار:**
-{('@' + user.username) if user and user.username else (user.first_name if user else 'نامشخص')}
+{_escape_markdown(buyer_display)}
 Telegram ID: `{order.user_id}`
 
-📦 **محصول:** {product.name if product else 'نامشخص'}
+📦 **محصول:** {_escape_markdown(product_name)}
 💰 مبلغ: {order.amount:,.0f} {order.currency}
 📅 تاریخ: {order.created_at.strftime('%Y-%m-%d %H:%M')}
 
-**وضعیت:** {order.status.value}
+**وضعیت:** {_escape_markdown(status_display)}
 """
 
         keyboard = None
@@ -181,8 +195,7 @@ async def handle_approve_order(callback: CallbackQuery, session: AsyncSession):
         try:
             await callback.bot.send_message(
                 chat_id=buyer_telegram_id,
-                text=f"✅ پرداخت شما تأیید شد.\n\n📦 کانفیگ شما:\n\n`{config_text}`\n\n⚠️ این کانفیگ اختصاصی شماست.\n\nاز خرید شما متشکریم ❤️",
-                parse_mode="Markdown",
+                text=f"✅ پرداخت شما تأیید شد.\n\n📦 کانفیگ شما:\n\n`{_escape_markdown(config_text)}`\n\n⚠️ این کانفیگ اختصاصی شماست.\n\nاز خرید شما متشکریم ❤️",                parse_mode="Markdown",
             )
         except Exception as send_error:
             logger.exception(f"Failed to send config to user {buyer_telegram_id}: {send_error}")

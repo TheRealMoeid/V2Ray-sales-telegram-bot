@@ -44,9 +44,20 @@ class UserRepository:
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
     ) -> tuple[User, bool]:
-        """Get existing user or create new one. Returns (user, created)."""
+        """Get existing user or create new one. Returns (user, created).
+
+        Bug #7 fix: if the user already exists, refresh their profile
+        fields (username/first_name/last_name) with the freshly-passed
+        values instead of returning the stored row untouched, so a
+        person's profile doesn't silently go stale after they change it
+        on Telegram.
+        """
         user = await self.get_by_telegram_id(telegram_id)
         if user:
+            user.username = username
+            user.first_name = first_name
+            user.last_name = last_name
+            await self.session.flush()
             return user, False
 
         user = await self.create(

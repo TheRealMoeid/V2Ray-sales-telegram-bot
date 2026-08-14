@@ -203,18 +203,21 @@ async def handle_confirm_delete_config(
     try:
         config_id = int(callback.data.split(":")[1])
 
-        result = await session.execute(select(Config).where(Config.id == config_id))
-        config = result.scalar_one_or_none()
+        # Bug #2 fix: route through ConfigService/ConfigRepository, which
+        # only deletes a config if it's still AVAILABLE, instead of
+        # deleting the row directly (which had no status check and could
+        # destroy a config already sold/assigned to a customer).
+        config_service = ConfigService(session)
+        deleted = await config_service.delete_config(config_id)
 
-        if not config:
+        if not deleted:
+            await session.rollback()
             await callback.answer(
-                "❌ کانفیگ یافت نشد.",
+                "❌ این کانفیگ دیگر قابل حذف نیست (ممکن است قبلاً فروخته شده یا حذف شده باشد).",
                 show_alert=True,
             )
             return
 
-        # Delete config
-        await session.delete(config)
         await session.commit()
 
         await callback.message.edit_text(
@@ -227,3 +230,4 @@ async def handle_confirm_delete_config(
     except Exception as e:
         logger.exception(f"Error in handle_confirm_delete_config: {e}")
         await callback.answer("❌ خطایی رخ داد", show_alert=True)
+        

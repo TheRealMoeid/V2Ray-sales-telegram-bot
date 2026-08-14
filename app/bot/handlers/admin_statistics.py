@@ -13,6 +13,13 @@ from app.services.statistics_service import StatisticsService
 logger = logging.getLogger(__name__)
 router = Router(name="admin_statistics")
 
+def _escape_markdown(text: str) -> str:
+    """Escape legacy-Markdown special characters in dynamic values so
+    they can't be misread as formatting delimiters by Telegram's parser
+    (mirrors the same helper in admin_orders.py)."""
+    for ch in ("_", "*", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
 
 def _back_to_admin_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -37,7 +44,7 @@ async def handle_admin_statistics(callback: CallbackQuery, session: AsyncSession
 💰 مجموع فروش: {stats.get('total_sales', 0):,.0f} تومان
 
 ✅ موفق: {stats.get('completed_orders', 0)}
-⏳ در انتظار: {stats.get('pending_orders', 0)} + 📤 ارسال شده: {stats.get('submitted_orders', 0) if 'submitted_orders' in stats else 0}
+⏳ در انتظار: {stats.get('pending_orders', 0)} + 📤 ارسال شده: {stats.get('receipt_submitted', 0)}
 ❌ رد شده: {stats.get('rejected_orders', 0)}
 
 📦 موجود: {stats.get('available_configs', 0)} | فروخته: {stats.get('assigned_configs', 0)}
@@ -81,13 +88,14 @@ async def handle_admin_users(callback: CallbackQuery, session: AsyncSession):
         )
         recent_users = recent_result.scalars().all()
 
-        users_text = f"👥 **آمار کاربران**\n\nتعداد کل: {total_users}\n\n"
+        users_text = ""
+        users_text += f"• {_escape_markdown(name)} (ID: `{user.telegram_id}`)\n"
         users_text += "**۱۰ کاربر اخیر:**\n"
 
         if recent_users:
             for user in recent_users:
                 name = f"@{user.username}" if user.username else (user.first_name or "بدون نام")
-                users_text += f"• {name} (ID: `{user.telegram_id}`)\n"
+                users_text += f"• {_escape_markdown(name)} (ID: `{user.telegram_id}`)\n"
         else:
             users_text += "_هنوز کاربری ثبت‌نام نکرده._"
 

@@ -17,9 +17,8 @@ class AdminOrdersKeyboard:
         """Get paginated orders keyboard."""
         keyboard = []
 
-        start_idx = (page - 1) * AdminOrdersKeyboard.PAGE_SIZE
-        end_idx = start_idx + AdminOrdersKeyboard.PAGE_SIZE
-        page_orders = orders[start_idx:end_idx]
+        
+        page_orders = orders
 
         status_emoji = {
             "PENDING_PAYMENT": "⏳",

@@ -17,6 +17,13 @@ from app.services.order_service import OrderService
 logger = logging.getLogger(__name__)
 router = Router(name="purchase")
 
+def _escape_markdown(text: str) -> str:
+    """Escape legacy-Markdown special characters in dynamic values so
+    they can't be misread as formatting delimiters by Telegram's parser
+    (mirrors the same helper in admin_orders.py / admin_statistics.py)."""
+    for ch in ("_", "*", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
 
 @router.callback_query(F.data == "buy_config")
 async def handle_buy_config(callback: CallbackQuery, session: AsyncSession):
@@ -109,7 +116,7 @@ async def handle_select_product(callback: CallbackQuery, session: AsyncSession):
         payment_text = f"""
 💳 اطلاعات پرداخت
 
-📦 محصول: {product.name}
+📦 محصول: {_escape_markdown(product.name)}
 💰 مبلغ: {product.price:,} {product.currency}
 ⏱ مدت: {product.duration} روز
 
@@ -132,6 +139,7 @@ async def handle_select_product(callback: CallbackQuery, session: AsyncSession):
         await callback.message.edit_text(
             text=payment_text,
             reply_markup=PaymentInfoKeyboard.get_payment_info_keyboard(),
+            parse_mode = "Markdown",
         )
         await callback.answer()
 
@@ -175,7 +183,7 @@ async def handle_retry_payment(callback: CallbackQuery, session: AsyncSession):
         payment_text = f"""
 💳 اطلاعات پرداخت
 
-📦 محصول: {product.name}
+📦 محصول: {_escape_markdown(product.name)}
 💰 مبلغ: {order.amount:,} {order.currency}
 
 ━━━━━━━━━━━━━━━━━━━━
@@ -197,6 +205,7 @@ async def handle_retry_payment(callback: CallbackQuery, session: AsyncSession):
         await callback.message.edit_text(
             text=payment_text,
             reply_markup=PaymentInfoKeyboard.get_payment_info_keyboard(),
+            parse_mode = "Markdown",
         )
         await callback.answer()
 

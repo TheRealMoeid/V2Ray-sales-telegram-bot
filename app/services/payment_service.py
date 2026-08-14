@@ -92,12 +92,16 @@ class PaymentService:
         product = product_result.scalar_one_or_none()
         
         # Build notification message
+        # Bug #4 fix: guard against `user` being None (e.g. a receipt event
+        # firing before a User row exists for this Telegram ID), not just a
+        # missing username, so admins still get notified in that case.
+        user_display = f"@{user.username or 'نامشخص'}" if user else "نامشخص"
         notification_text = f"""🧾 درخواست بررسی پرداخت
 
 Order ID: #{order.id}
 
 User:
-@{user.username or 'نامشخص'}
+{user_display}
 
 User ID:
 {order.user_id}

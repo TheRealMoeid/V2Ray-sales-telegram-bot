@@ -61,6 +61,7 @@ async def handle_receipt_photo(message: Message, session: AsyncSession):
         # Update order status
         order.status = OrderStatus.RECEIPT_SUBMITTED
         order.receipt_file_id = file_id
+        order.receipt_file_unique_id = file_unique_id
 
         await session.commit()
 
