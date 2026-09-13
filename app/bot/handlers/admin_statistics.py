@@ -88,8 +88,7 @@ async def handle_admin_users(callback: CallbackQuery, session: AsyncSession):
         )
         recent_users = recent_result.scalars().all()
 
-        users_text = ""
-        users_text += f"• {_escape_markdown(name)} (ID: `{user.telegram_id}`)\n"
+        users_text = f"👥 مجموع کاربران: {total_users}\n\n"
         users_text += "**۱۰ کاربر اخیر:**\n"
 
         if recent_users:
