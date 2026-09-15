@@ -29,7 +29,7 @@ Admins (identified by Telegram ID via an `AdminFilter`, not a DB flag) get an in
 |---|---|
 | Bot framework | [aiogram 3](https://docs.aiogram.dev/) (async, router-based, FSM for multi-step admin flows) |
 | Database | PostgreSQL, accessed via SQLAlchemy 2.0 async ORM and `asyncpg` |
-| Migrations | Alembic (currently drifted from the live models — see Known Issues) |
+| Migrations | Alembic — single source of truth for the schema; `alembic upgrade head` runs automatically on container startup (see [Running it](#running-it)) |
 | Config | Environment variables via `python-dotenv`, loaded into a `Settings` object |
 | Testing | `pytest` + `pytest-asyncio` (mock-based unit tests in `tests/test_bot.py`) |
 | Packaging | `requirements.txt` and `pyproject.toml` (Python ≥ 3.12) |
@@ -65,7 +65,8 @@ app/
     filters/admin.py             # AdminFilter — checks sender's Telegram ID against ADMIN_IDS
     middlewares/database.py       # injects a DB session into every handler call
     states/__init__.py             # aiogram FSM state groups (UserStates, AdminStates)
-alembic/                        # migration environment + versions (001_initial_migration, drifted — see Known Issues)
+alembic/                        # migration environment + versions (001_baseline_schema is the current source of truth for the schema)
+entrypoint.sh                     # Docker entrypoint: runs `alembic upgrade head`, then starts the bot
 tests/                           # pytest suite (mock-based) with async fixtures in conftest.py
 seed.py                           # dev-only script to create an admin user, sample products, and configs
 Dockerfile, docker-compose.yml     # containerized bot + Postgres
@@ -127,7 +128,7 @@ cp .env.example .env   # fill in BOT_TOKEN, ADMIN_IDS, bank info, etc.
 docker compose up --build
 ```
 
-`docker-compose.yml` brings up Postgres with a healthcheck and only starts the bot container once the database is ready. The bot runs as a non-root user inside the image. Note that `init_db()` (called on bot startup) uses `Base.metadata.create_all()`, so a fresh Docker deployment gets a schema generated directly from the current models — it does **not** currently rely on the Alembic migration.
+`docker-compose.yml` brings up Postgres with a healthcheck and only starts the bot container once the database is ready. The bot runs as a non-root user inside the image. The image's `entrypoint.sh` runs `alembic upgrade head` and then starts `python -m app.main` — the container will refuse to start the bot if migrations fail, rather than silently running against a stale or partial schema. `init_db()` (called once the bot process is up) no longer creates tables itself; it just does a lightweight connectivity check.
 
 ### Locally
 
@@ -136,10 +137,26 @@ pip install -r requirements.txt
 # or: pip install -e ".[dev]"
 
 # start a local Postgres, then:
-alembic upgrade head        # ⚠️ currently drifted from the models — see KNOWN_ISSUES.md
+alembic upgrade head        # applies the current schema — required before first run
 python seed.py               # optional: seed an admin user, sample products, and configs
 python -m app.main            # start polling
 ```
+
+Alembic is now the **only** thing that creates or changes tables. If you add or modify a model, generate a migration for it (`alembic revision --autogenerate -m "..."`), review the generated file, and commit it alongside the model change — there is no `create_all()` fallback anymore, so a forgotten migration will surface immediately as a startup or query failure instead of being silently patched.
+
+### Upgrading an existing deployment (schema already provisioned by the old `create_all()`)
+
+Deployments created before this change already have the correct tables — they were provisioned by `Base.metadata.create_all()`, which produces the same schema the current models describe — but they have no `alembic_version` row, since Alembic was never actually applying anything (a bug in `alembic/env.py`'s async wiring meant `alembic upgrade head` silently did nothing until now). Running `alembic upgrade head` as-is against such a database will fail trying to re-create tables that already exist.
+
+For an existing deployment, run this **once**, before deploying the new image:
+
+```bash
+alembic stamp head
+```
+
+This tells Alembic "the database is already at this migration" without executing any DDL. After stamping, `alembic upgrade head` (including the automatic one in `entrypoint.sh`) becomes a no-op for that database until a real future migration is added.
+
+If you're not sure whether a given database has already been stamped, `alembic current` (run against that database) will show nothing if it hasn't, and the current revision if it has.
 
 `seed.py` reads the first ID in `ADMIN_IDS` and exits with an error if it isn't set (no hardcoded fallback admin). It's idempotent — it skips seeding if products already exist — and it tolerates minor schema drift by mapping a few common alternate field names (e.g. `duration_days` → `duration`) before constructing model instances.
 
@@ -165,7 +182,7 @@ pytest
 - No refund or cancellation flow beyond `REJECTED`/`CANCELLED` statuses existing in the enum; the reject path is the only one wired up in the handlers shown here.
 - `LOW_STOCK_THRESHOLD` is defined in settings but isn't wired into any handler — no low-stock alert currently fires.
 - Config text is stored and sent as plain text with no expiry tracking tied to the product's `duration` field, so nothing in the bot itself revokes access when a subscription period ends.
-- See **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** for a full list of currently open bugs (including a crash in the admin "Users" screen), schema drift, and dead code before resuming development.
+- See **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** for a full list of currently open bugs and dead code before resuming development. (The Alembic schema drift previously listed there has been fixed — see the "Running it" section above.)
 
 ---
 

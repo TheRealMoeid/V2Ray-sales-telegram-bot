@@ -65,7 +65,7 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
 
-    async def run_migration(connection):
+    def do_run_migrations(connection):
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
@@ -77,7 +77,13 @@ def run_migrations_online() -> None:
 
     async def main():
         async with connectable.connect() as connection:
-            await connection.run_sync(run_migration)
+            # connection.run_sync() requires a plain sync callable - it wraps a
+            # sync-style Connection and invokes it inside a greenlet. Passing an
+            # `async def` here (as before) meant it was just constructing a
+            # coroutine object without awaiting it, so context.configure()/
+            # context.run_migrations() never actually ran and `alembic upgrade
+            # head` silently did nothing.
+            await connection.run_sync(do_run_migrations)
         await connectable.dispose()
 
     import asyncio

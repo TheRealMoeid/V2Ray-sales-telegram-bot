@@ -20,7 +20,7 @@ A Telegram bot ("V2ray shop bot") that sells pre-generated V2Ray/VLESS/VMess/Tro
 - On approval: atomically claims one `AVAILABLE` config row for that product, marks it `ASSIGNED`, marks the order `COMPLETED`, and DMs the config string directly to the buyer.
 - On rejection: prompts the admin for a free-text reason (via FSM), stores it, and shows it to the customer.
 - Gives customers an order-history view.
-- Gives admins an inline panel for config inventory management, order review/pagination/filtering, and shop statistics (users, orders by status, sales totals for today/week/month, config stock levels). **The "recent users" list inside this panel currently crashes — see §7.**
+- Gives admins an inline panel for config inventory management, order review/pagination/filtering, and shop statistics (users, orders by status, sales totals for today/week/month, config stock levels), including a "recent users" list.
 
 ### Main user (customer) workflow
 1. `/start` — registers/updates the user row (keyed by Telegram ID) and shows the main reply-keyboard menu. Profile fields (`username`/`first_name`/`last_name`) are refreshed on every call, so they don't go stale if the person changes them on Telegram.
@@ -42,7 +42,7 @@ Admin status is **not** a database flag — it's determined purely by checking w
 - **Reject order**: sets an FSM state waiting for a text reason, reads the admin's actual next message, then stores the rejection and logs an `AdminAction`.
 - **Configs**: view available/assigned counts, add a new config (validated to start with `vless://`, `vmess://`, or `trojan://`, tied to a specific product stored via FSM state), or delete an unassigned (`AVAILABLE`) config — deletion is routed through `ConfigService`/`ConfigRepository`, which refuses to delete anything that isn't still `AVAILABLE`, so already-sold configs can't be destroyed.
 - **Statistics**: total users/orders, orders broken down by status (including a correctly-populated "submitted"/`RECEIPT_SUBMITTED` count), total/today/week/month completed sales, available vs. assigned config counts.
-- **Users**: intended to show the 10 most recently registered users — **currently throws a `NameError` on every open; see §7.**
+- **Users**: shows the total registered user count plus the 10 most recently registered users (`@username` or first name, falling back to "بدون نام" if neither is set, plus Telegram ID). This screen previously crashed with a `NameError` on every open — **fixed and verified; see §7.**
 
 ### Overall architecture
 Layered, single-process async application:
@@ -74,14 +74,14 @@ Key architectural points:
 | Technology | Version constraint | Role in this project |
 |---|---|---|
 | **Python** | ≥ 3.12 (per `pyproject.toml`; Dockerfile uses `python:3.12-slim`) | Runtime. |
-| **aiogram** | `>=3.4.0,<4.0.0` | The Telegram bot framework. Used in its aiogram-3 style: `Router` objects per handler module, `Dispatcher.include_router(...)`, `F.data == ...` / `F.data.startswith(...)` / `F.data.regexp(...)` magic filters for callback routing, `Command("start")` filters, `BaseFilter` subclass (`AdminFilter`) for admin gating, `BaseMiddleware` for DB session injection, and `FSMContext`/`StatesGroup` for multi-step conversations. Polling (not webhooks) is used, started via `dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())`. Default parse mode is HTML (`DefaultBotProperties(parse_mode=ParseMode.HTML)`), though individual handlers that build Markdown-formatted text (backtick code blocks, bold) explicitly pass `parse_mode="Markdown"` — this is applied consistently now in `purchase.py`, `admin_orders.py`, and `admin_config.py`.
+| **aiogram** | `>=3.4.0,<4.0.0` | The Telegram bot framework. Used in its aiogram-3 style: `Router` objects per handler module, `Dispatcher.include_router(...)`, `F.data == ...` / `F.data.startswith(...)` / `F.data.regexp(...)` magic filters for callback routing, `Command("start")` filters, `BaseFilter` subclass (`AdminFilter`) for admin gating, `BaseMiddleware` for DB session injection, and `FSMContext`/`StatesGroup` for multi-step conversations. Polling (not webhooks) is used, started via `dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())`. Default parse mode is HTML (`DefaultBotProperties(parse_mode=ParseMode.HTML)`), though individual handlers that build Markdown-formatted text (backtick code blocks, bold) explicitly pass `parse_mode="Markdown"` — this is applied consistently now in `purchase.py`, `admin_orders.py`, `admin_config.py`, and `admin_statistics.py`.
 | **SQLAlchemy** | `>=2.0.0,<3.0.0` | ORM, used exclusively in its async, 2.0-style declarative form: `DeclarativeBase` subclass (`Base`), `Mapped[...]`/`mapped_column(...)` typed columns, `select(...)` statements executed via `AsyncSession.execute(...)`, and explicit `relationship(...)` including `viewonly=True` relationships with custom `primaryjoin` expressions for the Telegram-ID-based joins described above.
 | **asyncpg** | `>=0.29.0,<1.0.0` | Async PostgreSQL driver underneath SQLAlchemy's async engine (`postgresql+asyncpg://...` connection string).
 | **PostgreSQL** | 15 (per `docker-compose.yml`, `postgres:15-alpine`) | The only supported database backend. |
 | **Alembic** | `>=1.13.0,<2.0.0` | Schema migrations; `alembic/versions/` holds the migration history, `alembic/env.py` wires it to the app's SQLAlchemy metadata/`DATABASE_URL`. **The single existing migration (`001_initial_migration`) is drifted from the current models** (wrong column names/types in several tables, missing columns) — see §7. In practice, `init_db()`'s `create_all()` is what actually provisions the schema today, not Alembic. |
 | **python-dotenv** | `>=1.0.0,<2.0.0` | Loads `.env` into `os.environ` inside `app/config/settings.py` via `load_dotenv()`. |
 | **Docker / docker-compose** | — | `Dockerfile` builds a slim Python 3.12 image, installs `gcc`/`libpq-dev` for building `asyncpg`/psycopg-related wheels, runs as a non-root `botuser`, and starts with `python -m app.main`. `docker-compose.yml` runs the bot alongside a `postgres:15-alpine` service with a healthcheck gate (`pg_isready`) so the bot container only starts after Postgres is ready. |
-| **pytest / pytest-asyncio** | `>=8.0.0` / `>=0.23.0` | Test suite (`tests/test_bot.py`, `tests/conftest.py`); `pytest.ini`/`pyproject.toml` set `asyncio_mode = "auto"`. The suite is entirely mock-based (`AsyncMock`/`MagicMock`) — no test spins up a real or in-memory database, so integration-level regressions (like the current `admin_statistics.py` crash) are not caught by `pytest` passing. |
+| **pytest / pytest-asyncio** | `>=8.0.0` / `>=0.23.0` | Test suite (`tests/test_bot.py`, `tests/test_admin_users_handler.py`, `tests/conftest.py`); `pytest.ini`/`pyproject.toml` set `asyncio_mode = "auto"`. The suite is entirely mock-based (`AsyncMock`/`MagicMock`) — no test spins up a real or in-memory database, so schema-level regressions (like the Alembic drift in §7) would not be caught by `pytest` passing, though handler-logic regressions (like the now-fixed `admin_statistics.py` crash) are. |
 | **ruff / black** | dev-only | Linting/formatting (line length 100, target py312). |
 | **aiofiles** | `>=23.0.0` | Listed as a dependency (async file I/O helper); not central to the core purchase/approval flow observed in the handlers. |
 
@@ -135,13 +135,10 @@ The constructor also accepts these as direct keyword args (used by tests to cons
 │   │       └── admin_action_repository.py  # config assignment and order approval.
 │   ├── services/                      # Business logic layer, called from handlers; each wraps
 │   │   ├── user_service.py            #   one or more repositories
-│   │   ├── product_service.py         #   (currently unused — no handler calls into it)
-│   │   ├── config_service.py          # available-config queries/counts, atomic assignment entry
-│   │   │                                point (assign_config_to_order), config creation/deletion
-│   │   ├── order_service.py           # order CRUD, user_has_pending_order guard,
-│   │   │                                approve_order_with_config_assignment (the core atomic
-│   │   │                                approve+assign+notify transaction), reject_order,
-│   │   │                                order counts / sales sum
+│   │   ├── order_service.py           #   order lifecycle incl. atomic config assignment on
+│   │   │                                approval, user_has_pending_order guard
+│   │   ├── config_service.py          #   config counts, product lookups for the "add config" flow
+│   │   ├── product_service.py         #   product CRUD — currently unused by any handler
 │   │   ├── payment_service.py         # payment-info text formatting (unused — purchase.py builds
 │   │   │                                its own text inline), PaymentReceipt creation,
 │   │   │                                notify_admins_new_receipt (fans a text+photo notification
@@ -166,8 +163,9 @@ The constructor also accepts these as direct keyword args (used by tests to cons
 │       │   ├── admin_config.py        # config inventory: list counts, add config (FSM: pick
 │       │   │                            product → submit config text), delete config (routed
 │       │   │                            through the service layer's AVAILABLE-only guard)
-│       │   └── admin_statistics.py    # admin_statistics and admin_users callbacks — the latter
-│       │                                currently crashes with a NameError, see §7
+│       │   └── admin_statistics.py    # admin_statistics and handle_admin_users callbacks —
+│       │                                the latter previously crashed with a NameError, now
+│       │                                fixed and verified (see §7)
 │       ├── keyboards/                 # Static/dynamic InlineKeyboardMarkup / ReplyKeyboardMarkup
 │       │   ├── main_menu.py           #   builders, one module per screen (admin_menu,
 │       │   ├── admin_menu.py          #   admin_orders — includes pagination/filter buttons,
@@ -197,8 +195,10 @@ The constructor also accepts these as direct keyword args (used by tests to cons
 │                                         fallback admin ID)
 ├── tests/
 │   ├── conftest.py                    # Test fixtures (mock session/user/product/config/order)
-│   └── test_bot.py                    # Mock-based tests covering models, services, filters,
-│                                         and settings parsing — no DB/integration coverage
+│   ├── test_bot.py                    # Mock-based tests covering models, services, filters,
+│   │                                     and settings parsing — no DB/integration coverage
+│   └── test_admin_users_handler.py    # Regression tests for the fixed handle_admin_users
+│                                         NameError (see §7) — 7 tests, mock-based
 ├── requirements.txt                   # Pinned dependency ranges (mirrors pyproject.toml)
 ├── pyproject.toml                     # Project metadata, dependency list, black/ruff/pytest config
 ├── pytest.ini
@@ -252,6 +252,7 @@ The constructor also accepts these as direct keyword args (used by tests to cons
 - **Admin notification fan-out** (`PaymentService.notify_admins_new_receipt`) iterates `settings.ADMIN_IDS` and sends a text summary + the receipt photo to each; failures for one admin are caught and logged so one bad chat doesn't block notifying the rest. It also tolerates the edge case where no `User` row exists yet for the buyer (falls back to a "نامشخص" display name instead of crashing).
 - **Reply-keyboard vs inline-keyboard duplication**: several actions (buy, view orders, help, support) are wired twice — once as inline-keyboard callback handlers, once as plain-text matches against a persistent reply keyboard (`F.text.contains(...)`) — each guarded by a small local `_no_active_state*` filter function that checks `await state.get_state() is None`, so these text shortcuts don't accidentally fire mid-FSM-flow (e.g., while an admin is in the middle of typing a rejection reason).
 - **Order-list pagination** (`admin_orders.py` + `AdminOrdersKeyboard`) fetches only the current page's rows from the DB via `OFFSET`/`LIMIT` and passes that already-paginated list straight to the keyboard builder, which renders it without re-slicing. All pages are reachable, not just page 1.
+- **`handle_admin_users`** (`admin_statistics.py`) runs a `SELECT count(*)` for the total user count and a separate `SELECT ... ORDER BY created_at DESC LIMIT 10` for the recent-users list, then renders both: total count first, then a bulleted list of each user's `@username` (or `first_name`, or "بدون نام" if neither is set) plus their Telegram ID, with Markdown-special characters escaped via `_escape_markdown`. Previously crashed before either query's result could be rendered — fixed; see §7.
 
 ---
 
@@ -266,6 +267,7 @@ The constructor also accepts these as direct keyword args (used by tests to cons
 - All user-facing strings are Persian; keep new strings consistent in language and tone (informal storefront Persian with emoji section markers) if extending the bot.
 - The **Alembic migration is not currently trustworthy** — don't assume `alembic upgrade head` produces a schema matching the models. `init_db()`'s `create_all()` is what actually provisions the schema in this repo's `main()`/Docker startup path today. Regenerate the migration before relying on Alembic for a real deployment.
 - Several service classes/methods look load-bearing but are dead code (`ProductService`, `OrderRepository.approve_order`, `PaymentService.get_payment_info`/`validate_receipt_photo`, `ProductListKeyboard.get_product_confirmation`). Check whether a handler actually calls something before assuming it's part of the live flow.
+- When building any string incrementally with `+=` inside a handler (as `admin_statistics.py` and `admin_orders.py` do for Markdown text), double-check that every referenced variable is assigned *before* the line that uses it, not just somewhere later in the function — this is exactly the class of bug that caused the (now-fixed) `handle_admin_users` `NameError`. A broad `except Exception` around handler bodies will hide this kind of mistake behind a generic error alert rather than a traceback, so it's easy to miss without dedicated tests.
 
 ---
 
@@ -273,9 +275,10 @@ The constructor also accepts these as direct keyword args (used by tests to cons
 
 This section is the up-to-date replacement for the older bug-report documents. Full detail lives in `KNOWN_ISSUES.md`; summary here:
 
-- 🔴 **`admin_statistics.py::handle_admin_users` crashes with `NameError`** every time it runs (references `name`/`user` before they're assigned, outside the loop that defines them). The "👥 کاربران" admin screen is currently non-functional. This is a new regression not previously documented.
 - 🟡 **Alembic migration (`001_initial_migration.py`) is out of sync with the current models** (wrong types/names on `products`, `orders`, `configs`, `payment_receipts`, plus a stray `users.is_admin` column with no model equivalent). Masked today by `create_all()`, but would break a real `alembic upgrade head` run against a fresh DB.
 - 🟡 **Dead code**: `OrderRepository.approve_order`, `ProductService`/`ProductRepository`, `PaymentService.get_payment_info`/`validate_receipt_photo`, `ProductListKeyboard.get_product_confirmation`, and a shadowed duplicate `admin_panel` callback handler in `admin_orders.py`.
 - 🟢 **Minor**: `Numeric` columns typed as `float` instead of `Decimal`; test suite is mock-only with no DB/integration coverage.
+
+**✅ Recently fixed:** `admin_statistics.py::handle_admin_users` previously crashed with a `NameError` on every invocation (it referenced `name`/`user` before they were assigned, outside the loop that defines them), making the admin "👥 کاربران" screen completely non-functional. This has been **fixed and verified**: the stray lines were removed, the header was moved before the loop, and the previously-unused `total_users` count is now displayed. Verified via 7 new regression tests in `tests/test_admin_users_handler.py` (which fail against the old code and pass against the fix), the full 30-test suite passing, and live manual testing against a running bot. The fix has been pushed to GitHub. If a `NameError`/`UnboundLocalError` reappears in this handler, treat it as a fresh regression, not a reopening of this issue — check for a similar variable-ordering mistake before assuming it's the same bug.
 
 Everything else previously reported in `(DONE)V2Ray_Bot_Code_Review.md` and `BUGS.md` (the startup-blocking syntax errors, the `Order.user_id` FK mismatch, config sent to the wrong chat, missing imports, missing `chat_id`, broken pagination, unsafe config deletion, stale user profiles, etc.) has been verified fixed in the current code and should be treated as resolved history, not open work.

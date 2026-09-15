@@ -4,37 +4,10 @@ This file replaces the numbered bug lists in `(DONE)V2Ray_Bot_Code_Review.md` an
 `BUGS.md`. Those two documents were point-in-time audits of earlier, broken states
 of the repository — almost everything they flagged has since been fixed. This file
 keeps only the items from those reports that are **still true against the current
-code**, plus one newly-discovered regression.
+code**.
 
 Those two files should be moved to a `docs/history/` folder (or deleted) once this
 file is in place, so nobody mistakes a resolved historical bug for a live one.
-
----
-
-## 🔴 New — Admin "Users" screen crashes (regression, previously undocumented)
-
-**File:** `app/bot/handlers/admin_statistics.py`, `handle_admin_users`
-
-```python
-users_text = ""
-users_text += f"• {_escape_markdown(name)} (ID: `{user.telegram_id}`)\n"
-users_text += "**۱۰ کاربر اخیر:**\n"
-
-if recent_users:
-    for user in recent_users:
-        name = f"@{user.username}" if user.username else (user.first_name or "بدون نام")
-        users_text += f"• {_escape_markdown(name)} (ID: `{user.telegram_id}`)\n"
-```
-
-The second line references `name` and `user` before either is ever assigned — both
-are only defined inside the `for` loop several lines later. This raises
-`NameError: name 'name' is not defined` every time this handler runs, regardless of
-whether any users exist. The "👥 کاربران" (Users) admin screen is currently
-**completely broken**.
-
-**Fix:** delete the two stray lines above the `if recent_users:` block; the header
-text (`"**۱۰ کاربر اخیر:**\n"`) should be set once, before the loop, and the
-per-user line should only be built inside the loop where `user`/`name` exist.
 
 ---
 
@@ -111,14 +84,82 @@ of the code paths actually in use.
   foot-gun if arithmetic mixing `Decimal` and `float` is added later. Either add
   `asdecimal=False` to the columns or change the type hints to `Decimal`.
 - **Test count drift**: README states "23 tests in `tests/test_bot.py`"; the
-  current file contains ~24 test methods. Minor, but worth re-counting whenever
-  the suite changes.
-- **Mock-only test suite**: `tests/test_bot.py` uses `AsyncMock`/`MagicMock`
-  throughout and never exercises a real (or in-memory) database or the full
-  handler call chain. It would **not** have caught most of the bugs described in
-  the historical reports, nor would it catch the `admin_statistics.py` regression
-  above. Worth adding at least one integration test against SQLite/async engine
-  that runs the purchase → receipt → approve flow end-to-end.
+  current file contains ~24 test methods (30, including
+  `tests/test_admin_users_handler.py` — see the "Recently Fixed" section below).
+  Minor, but worth re-counting whenever the suite changes.
+- **Mock-only test suite**: `tests/test_bot.py` and `tests/test_admin_users_handler.py`
+  use `AsyncMock`/`MagicMock` throughout and never exercise a real (or in-memory)
+  database or the full handler call chain. This is fine for catching logic bugs
+  like the one below, but it would **not** catch schema-level problems (e.g. the
+  Alembic drift above). Worth adding at least one integration test against
+  SQLite/async engine that runs the purchase → receipt → approve flow end-to-end.
+
+---
+
+## ✅ Recently Fixed
+
+### Admin "Users" screen crash (`NameError` regression) — FIXED
+
+**File:** `app/bot/handlers/admin_statistics.py`, `handle_admin_users`
+
+**Status:** Fixed and verified. Merged to GitHub by Moeid.
+
+**Root cause:** The handler referenced the loop variables `name` and `user` on a
+line placed *before* the `for` loop that defines them:
+
+```python
+# Before (buggy):
+users_text = ""
+users_text += f"• {_escape_markdown(name)} (ID: `{user.telegram_id}`)\n"   # <- name/user undefined here
+users_text += "**۱۰ کاربر اخیر:**\n"
+
+if recent_users:
+    for user in recent_users:
+        name = f"@{user.username}" if user.username else (user.first_name or "بدون نام")
+        users_text += f"• {_escape_markdown(name)} (ID: `{user.telegram_id}`)\n"
+```
+
+This raised `NameError: name 'name' is not defined` (or `UnboundLocalError` on
+some Python versions) on **every** invocation of the handler, regardless of
+whether any users existed. Because the handler's broad `except Exception` block
+swallowed the crash, the admin only ever saw a generic "❌ خطایی رخ داد" alert —
+the "👥 کاربران" (Users) screen in the admin panel was completely non-functional.
+
+**Fix applied (Approach B — minimal removal + surface `total_users`):**
+
+```python
+# After (fixed):
+users_text = f"👥 مجموع کاربران: {total_users}\n\n"
+users_text += "**۱۰ کاربر اخیر:**\n"
+
+if recent_users:
+    for user in recent_users:
+        name = f"@{user.username}" if user.username else (user.first_name or "بدون نام")
+        users_text += f"• {_escape_markdown(name)} (ID: `{user.telegram_id}`)\n"
+else:
+    users_text += "_هنوز کاربری ثبت‌نام نکرده._"
+```
+
+The two stray lines were removed, the header line was moved before the
+`if recent_users:` block, and `total_users` — which was already being queried
+via a separate `SELECT count(*)` but never used anywhere — is now displayed at
+the top of the screen instead of being dead-computed.
+
+**Verification:**
+- `fix_admin_users_nameerror.patch` — 2-line unified diff, applied cleanly to a
+  fresh clone.
+- `tests/test_admin_users_handler.py` — 7 new tests covering: the core
+  regression (handler completes and calls `edit_text` instead of hitting the
+  `except` block), the "no users yet" placeholder branch, username/first-name
+  fallback logic, Markdown-escaping of special characters in names, and that
+  `total_users` is now rendered. All 7 fail against the pre-fix code
+  (reproducing the exact `NameError`/`UnboundLocalError`) and all 7 pass
+  against the fix.
+- Full suite (`tests/test_bot.py` + `tests/test_admin_users_handler.py`, 30
+  tests total) passes with no regressions elsewhere.
+- Manually verified against a live running bot (Docker) by Moeid: the "👥 ۱۰
+  کاربر اخیر" screen now renders the total user count plus the recent-users
+  list instead of throwing the generic error alert.
 
 ---
 
@@ -155,5 +196,7 @@ the current codebase, including:
 - `submitted_orders` vs. `receipt_submitted` stats key mismatch.
 - Inconsistent `parse_mode` in `purchase.py`.
 - Stale user profile info never being refreshed on repeat visits.
+- **The admin "Users" screen `NameError` regression** (see "Recently Fixed"
+  above) — fixed and verified.
 
 If any of the above resurfaces, treat it as a regression, not a known issue.

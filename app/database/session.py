@@ -1,5 +1,6 @@
 """Database session management."""
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
@@ -36,9 +37,19 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Initialize database tables."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Verify the database is reachable on startup.
+
+    Schema management is now handled entirely by Alembic migrations
+    (`alembic upgrade head`), which must be run before this process starts
+    (see the Docker entrypoint / README). This function intentionally does
+    NOT call `Base.metadata.create_all()` anymore: if a model change is
+    ever made without a matching migration, we want the app to fail loudly
+    here (or on the first query touching the missing/mismatched column)
+    rather than have `create_all()` silently patch the live schema and
+    mask the drift, as it did previously.
+    """
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
 
 
 async def close_db():

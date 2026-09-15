@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Make the entrypoint script executable
+RUN chmod +x entrypoint.sh
+
 # Create non-root user for security
 RUN useradd -m -u 1000 botuser && chown -R botuser:botuser /app
 USER botuser
@@ -25,5 +28,5 @@ USER botuser
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Run the bot
-CMD ["python", "-m", "app.main"]
+# Run pending Alembic migrations, then start the bot
+ENTRYPOINT ["./entrypoint.sh"]
