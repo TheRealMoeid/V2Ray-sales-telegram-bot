@@ -11,37 +11,6 @@ file is in place, so nobody mistakes a resolved historical bug for a live one.
 
 ---
 
-## 🟡 Alembic migration is still out of sync with the models (schema drift)
-
-**File:** `alembic/versions/001_initial_migration.py` vs. `app/database/models/*`
-
-Confirmed still true by diffing the migration against current model definitions:
-
-| Table | Migration says | Model says | Impact |
-|---|---|---|---|
-| `products` | column `duration_days` | attribute `duration` | `UndefinedColumn` if migration is applied |
-| `products` | `price` = `Integer` | `price` = `Numeric(10,2)` | type mismatch / precision loss |
-| `orders` | no `unit_price` column | `unit_price` required (`nullable=False`) | every order insert fails |
-| `orders` | no `receipt_file_unique_id` column | model has it | drift |
-| `configs` | `status` = `String(20)` | `status` = native `Enum(ConfigStatus)` | type mismatch |
-| `payment_receipts` | no `chat_id` column | `chat_id` required (`nullable=False`) | receipt insert fails |
-| `payment_receipts` | `message_id` nullable | model requires it | drift |
-| `users` | has `is_admin` column | model has no such column (only a hardcoded property) | dead column if applied |
-
-**Why it still matters:** `app/database/session.py`'s `init_db()` runs
-`Base.metadata.create_all()` on every startup, which currently masks this drift in
-practice (the live schema always matches the ORM because it's generated from the
-ORM, not from Alembic). But the Dockerfile/README both document `alembic upgrade
-head` as the supported migration path — running that against a genuinely fresh
-database would produce a schema the app cannot use.
-
-**Fix:** regenerate the migration from current models
-(`alembic revision --autogenerate -m "sync with models"`), or explicitly document
-that `create_all()` is the source of truth for now and Alembic is not yet
-production-ready.
-
----
-
 ## 🟡 Dead code
 
 None of these cause bugs today, but they're maintenance traps — a future
@@ -87,16 +56,95 @@ of the code paths actually in use.
   current file contains ~24 test methods (30, including
   `tests/test_admin_users_handler.py` — see the "Recently Fixed" section below).
   Minor, but worth re-counting whenever the suite changes.
-- **Mock-only test suite**: `tests/test_bot.py` and `tests/test_admin_users_handler.py`
-  use `AsyncMock`/`MagicMock` throughout and never exercise a real (or in-memory)
-  database or the full handler call chain. This is fine for catching logic bugs
-  like the one below, but it would **not** catch schema-level problems (e.g. the
-  Alembic drift above). Worth adding at least one integration test against
-  SQLite/async engine that runs the purchase → receipt → approve flow end-to-end.
+- **Mock-only unit test suite**: `tests/test_bot.py` and
+  `tests/test_admin_users_handler.py` use `AsyncMock`/`MagicMock` throughout and
+  never exercise a real database or the full handler call chain. This is fine for
+  catching logic bugs like the `handle_admin_users` regression below, but on its
+  own it would **not** catch schema-level problems — which is exactly what
+  happened with the Alembic drift (see "Recently Fixed"). That gap is now
+  partially closed: `tests/test_alembic_schema_sync.py` is a real integration
+  suite against Postgres that specifically guards against migration/model drift
+  reappearing. The purchase → receipt → approve handler flow itself is still only
+  covered by mocks; an end-to-end integration test for that flow would still be
+  worth adding.
 
 ---
 
 ## ✅ Recently Fixed
+
+### Alembic migration schema drift — FIXED
+
+**Files:** `alembic/versions/001_initial_migration.py` (deleted) →
+`alembic/versions/001_baseline_schema.py` (new), `alembic/env.py`,
+`app/database/session.py`, `Dockerfile`, `entrypoint.sh` (new), `README.md`
+
+**Status:** Fixed and verified. Merged to GitHub by Moeid.
+
+**Root cause:** `001_initial_migration.py` was hand-written once and never kept in
+sync with the SQLAlchemy models as they evolved. Confirmed drift included:
+`products.duration_days` vs. model's `duration`; `Integer` vs. `Numeric(10,2)` for
+`products.price`/`orders.amount`/`orders.unit_price`; missing
+`orders.unit_price`/`receipt_file_unique_id` and `payment_receipts.chat_id`
+columns; `String` vs. native `Enum` for `orders.status`/`configs.status`; a stray
+`users.is_admin` column with no model equivalent; `Integer` vs. `BigInteger`
+primary keys on every table except `users`; a missing `UNIQUE` constraint on
+`configs.order_id`; and — worst of all — a hand-added foreign key from
+`admin_actions.admin_id` to `users.id` that contradicts the intentional "Bug #3
+fix" design (that column stores a raw Telegram ID, not a `users.id` value, so the
+FK would have rejected every audit-log insert if it were ever actually enforced).
+
+**A second, independent bug was found and fixed in the process:**
+`alembic/env.py`'s `run_migrations_online()` passed an `async def` function to
+`connection.run_sync()`, which requires a plain **synchronous** callable.
+`run_sync()` was therefore just constructing a coroutine object without awaiting
+it, so `context.configure()`/`context.run_migrations()` never actually executed —
+`alembic upgrade head` silently exited `0` while doing nothing at all, for every
+migration, regardless of its content. This was masked because
+`init_db()`'s `Base.metadata.create_all()` was what actually provisioned the
+schema in every real startup path.
+
+**Fix applied (Approach A+ — clean slate & cutover):**
+1. Deleted `001_initial_migration.py`; regenerated a baseline
+   (`001_baseline_schema.py`) via a real `alembic revision --autogenerate` run
+   against an empty Postgres instance, reviewed to confirm no stray FKs on the
+   Telegram-ID columns, `Numeric(10,2)` for money columns, native `Enum` types,
+   and `BigInteger` PKs throughout.
+2. Fixed the `env.py` async/sync bug (async callback → plain `def`, per the
+   standard Alembic async recipe) so `alembic upgrade head` actually runs.
+3. Removed `Base.metadata.create_all()` from `session.py`'s `init_db()`,
+   replacing it with a lightweight `SELECT 1` connectivity check — schema
+   management is now exclusively Alembic's job, so a future model change without
+   a matching migration fails loudly instead of being silently patched.
+4. Added `entrypoint.sh` (runs `alembic upgrade head`, then `exec python -m
+   app.main`) and pointed the Docker image's `ENTRYPOINT` at it, so the container
+   won't start the bot if migrations fail.
+5. Updated `README.md` with the new Alembic-first workflow and an "Upgrading an
+   existing deployment" section: any database that already has the correct
+   schema via the old `create_all()` behavior needs a one-time `alembic stamp
+   head` (not `upgrade head`) since it has no `alembic_version` row yet.
+
+**Verification:**
+- `alembic_migration_drift_fix.patch` — applied cleanly (`git apply --check`) to
+  a fresh clone.
+- `tests/test_alembic_schema_sync.py` — 7 new integration tests against a real
+  Postgres instance: `alembic upgrade head` actually creates all 7 tables and
+  writes an `alembic_version` row (regression guard for the `env.py` bug); the
+  migration produces **zero drift** against `Base.metadata` via
+  `alembic.autogenerate.compare_metadata` (the core drift check); no foreign key
+  exists on `admin_actions.admin_id`; the specific previously-drifted
+  columns/types now match the models; `init_db()` no longer creates tables; and
+  the full "existing deployment" `alembic stamp head` → `alembic upgrade head`
+  flow is a no-op as documented. **All 7 fail against the pre-fix code** (including
+  a caught `NoSuchTableError` and an assertion proving `alembic upgrade head` used
+  to do nothing) **and all 7 pass against the fix.**
+- Full suite (`tests/test_bot.py` + `tests/test_admin_users_handler.py` +
+  `tests/test_alembic_schema_sync.py`, 37 tests total) passes with no
+  regressions elsewhere.
+- Re-verified independently against a fresh clone of `main` after Moeid merged:
+  `alembic upgrade head` against an empty database creates all 7 tables and
+  `alembic current` reports the head revision; full 37-test suite passes.
+
+---
 
 ### Admin "Users" screen crash (`NameError` regression) — FIXED
 
@@ -198,5 +246,7 @@ the current codebase, including:
 - Stale user profile info never being refreshed on repeat visits.
 - **The admin "Users" screen `NameError` regression** (see "Recently Fixed"
   above) — fixed and verified.
+- **The Alembic migration schema drift, including the `env.py` async/sync bug**
+  (see "Recently Fixed" above) — fixed and verified.
 
 If any of the above resurfaces, treat it as a regression, not a known issue.
